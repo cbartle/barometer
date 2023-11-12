@@ -6,6 +6,39 @@
 int LED_1 = 0;
 int LED_2 = 1;
 int LED_3 = 2;
+int PRESSURE_LED_1 = 3;
+int PRESSURE_LED_2 = 6;
+int PRESSURE_LED_3 = 7;
+int PRESSURE_LED_4 = 8;
+int PRESSURE_LED_5 = 9;
+int PRESSURE_LED_6 = 10;
+int PRESSURE_LED_7 = 11;
+int PRESSURE_LED_8 = 12;
+int PRESSURE_LED_9 = 13;
+int PRESSURE_LED_10 = 14;
+
+void pressure_leds_init(){
+    gpio_init(PRESSURE_LED_1);
+    gpio_set_dir(PRESSURE_LED_1, GPIO_OUT);
+    gpio_init(PRESSURE_LED_2);
+    gpio_set_dir(PRESSURE_LED_2, GPIO_OUT);
+    gpio_init(PRESSURE_LED_3);
+    gpio_set_dir(PRESSURE_LED_3, GPIO_OUT);
+    gpio_init(PRESSURE_LED_4);
+    gpio_set_dir(PRESSURE_LED_4, GPIO_OUT);
+    gpio_init(PRESSURE_LED_5);
+    gpio_set_dir(PRESSURE_LED_5, GPIO_OUT);
+    gpio_init(PRESSURE_LED_6);
+    gpio_set_dir(PRESSURE_LED_6, GPIO_OUT);
+    gpio_init(PRESSURE_LED_7);
+    gpio_set_dir(PRESSURE_LED_7, GPIO_OUT);
+    gpio_init(PRESSURE_LED_8);
+    gpio_set_dir(PRESSURE_LED_8, GPIO_OUT);
+    gpio_init(PRESSURE_LED_9);
+    gpio_set_dir(PRESSURE_LED_9, GPIO_OUT);
+    gpio_init(PRESSURE_LED_10);
+    gpio_set_dir(PRESSURE_LED_10, GPIO_OUT);
+}
 
 void init_leds(){
     on_board_led_init_configured_state(true);
@@ -16,6 +49,7 @@ void init_leds(){
     gpio_set_dir(LED_2, GPIO_OUT);
     gpio_init(LED_3);
     gpio_set_dir(LED_3, GPIO_OUT);
+    pressure_leds_init();
 }
 
 void reset_leds(){
@@ -38,6 +72,16 @@ void process_farenheit(float temp_f){
     if(rounded >= 80){
         gpio_put(LED_3, true);
     }
+}
+
+void process_pressure(float pressure){
+    //pressure is in pascals.
+
+    //always keep the lowest light on. 
+    gpio_put(PRESSURE_LED_1, true);
+
+    
+
 }
 
 int main() {
