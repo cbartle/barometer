@@ -17,6 +17,7 @@
    GND (pin 38)  -> GND on MPL3115A2 board
 
 */
+
 #define ADDR 0x60
 #define INT1_PIN _u(16)
 
@@ -35,12 +36,17 @@
 #define MPL3115A2_OFF_T _u(0x2C)
 #define MPL3115A2_OFF_H _u(0x2D)
 
+#define MPL3115a2_BAROMETER_MODE_OSR_128 _u(0x38) // 00111000
+#define MPL3115a2_ALTIMETER_MODE_OSR_128 _u(0xB8) // 10111000
+
 #define MPL3115A2_FIFO_DISABLED _u(0x00)
 #define MPL3115A2_FIFO_STOP_ON_OVERFLOW _u(0x80)
 #define MPL3115A2_FIFO_SIZE 32
 #define MPL3115A2_DATA_BATCH_SIZE 5
 #define MPL3115A2_ALTITUDE_NUM_REGS 3
 #define MPL3115A2_ALTITUDE_INT_SIZE 20
+#define MPL3115A2_BAROMETER_NUM_REGS 3
+#define MPL3115A2_BAROMETER_INT_SIZE 20
 #define MPL3115A2_TEMPERATURE_INT_SIZE 12
 #define MPL3115A2_NUM_FRAC_BITS 4
 
@@ -50,12 +56,17 @@ volatile uint8_t fifo_data[MPL3115A2_FIFO_SIZE * MPL3115A2_DATA_BATCH_SIZE];
 volatile bool has_new_data = false;
 const uint READ_PIN = 22;
 bool read_pin_state = false;
+bool altitude_is_set = false;
+
+static float tempF = 0.0, tempC = 0.0, altitude = 0.0, pressure = 0.0;
 
 struct mpl3115a2_data_t {
     // Q8.4 fixed point
     float temperature;
     // Q16.4 fixed-point
     float altitude;
+    // Q8.4 fixed point
+    float pressure;
 };
 
 void copy_to_vbuf(uint8_t buf1[], volatile uint8_t buf2[], int buflen) {
@@ -84,8 +95,15 @@ uint8_t mpl3115a2_read_reg(uint8_t reg) {
 }
 
 void mpl3115a2_init() {
-    // set as altimeter with oversampling ratio of 128
-    uint8_t buf[] = {MPL3115A2_CTRLREG1, 0xB8};
+
+    // set as barometer with oversampling ratio of 128
+    uint8_t ctrl_reg1_data = MPL3115a2_BAROMETER_MODE_OSR_128;
+    
+    if(altitude_is_set){
+        //overwrite the buf for altitude reading
+        ctrl_reg1_data = MPL3115a2_ALTIMETER_MODE_OSR_128;
+    }
+    uint8_t buf[] = {MPL3115A2_CTRLREG1, ctrl_reg1_data};
     i2c_write_blocking(i2c_default, ADDR, buf, 2, false);
 
     // set data refresh every 2 seconds, 0 next bits as we're not using those interrupts
@@ -105,8 +123,8 @@ void mpl3115a2_init() {
     i2c_write_blocking(i2c_default, ADDR, buf, 2, false);
 
     // set p, t and h offsets here if needed
-    // eg. 2's complement number: 0xFF subtracts 1 meter
-    //buf[0] = MPL3115A2_OFF_H, buf[1] = 0xFF;
+    // eg. 2's complement number: 0xFF subtracts 1 meter (Altimeter)
+    //buf[0] = MPL3115A2_OFF_P, buf[1] = 0xFF;
     //i2c_write_blocking(i2c_default, ADDR, buf, 2, false);
 
     // do not accept more data on FIFO overflow
@@ -114,7 +132,7 @@ void mpl3115a2_init() {
     i2c_write_blocking(i2c_default, ADDR, buf, 2, false);
 
     // set device active
-    buf[0] = MPL3115A2_CTRLREG1, buf[1] = 0xB9;
+    buf[0] = MPL3115A2_CTRLREG1, buf[1] = ctrl_reg1_data | 0x01;
     i2c_write_blocking(i2c_default, ADDR, buf, 2, false);
 }
 
@@ -138,13 +156,11 @@ void gpio_callback(uint gpio, uint32_t events) {
 
 #endif
 
-void mpl3115a2_convert_fifo_batch(uint8_t start, volatile uint8_t buf[], struct mpl3115a2_data_t *data);
-
 /// @brief Initialize the mpl3115a2 sensor.  
-void sensor_init()
+void sensor_init(bool barometer_mode)
 {
      printf("Hello, MPL3115A2. Waiting for something to interrupt me!...\n");
-
+    altitude_is_set = !barometer_mode;
     // use default I2C0 at 400kHz, I2C is active low
     i2c_init(i2c_default, 400 * 1000);
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
@@ -170,47 +186,73 @@ void sensor_init()
     gpio_put(READ_PIN, read_pin_state);
 }
 
-static float tempF = 0.0, tempC = 0.0, altitude = 0.0;
 float tsum = 0, hsum = 0;
 
-void mpl3115a2_convert_fifo_batch(uint8_t start, volatile uint8_t buf[], struct mpl3115a2_data_t *data) {
-    // convert a batch of fifo data into temperature and altitude data
-
+float get_altitude_from_fifo(uint8_t start, volatile uint8_t buf[]){
     // 3 altitude registers: MSB (8 bits), CSB (8 bits) and LSB (4 bits, starting from MSB)
     // first two are integer bits (2's complement) and LSB is fractional bits -> makes 20 bit signed integer
     int32_t h = (int32_t) buf[start] << 24;
     h |= (int32_t) buf[start + 1] << 16;
     h |= (int32_t) buf[start + 2] << 8;
-    data->altitude = ((float)h) / 65536.f;
+    return ((float)h) / 65536.f;
+}
 
+float get_pressure_from_fifo(uint8_t start, volatile uint8_t buf[]){
+    // 3 pressure registers: MSB (8 bits), CSB (8 bits) and LSB (4 bits, starting from MSB)
+    // first two  and bits 7-6 of LSB are integer bits (2's complement) and bit 5-4 of LSB are fractional bits -> makes 20 bit signed integer
+    int32_t out_p_msb = (int32_t) buf[start];
+    int32_t out_p_csb = (int32_t) buf[start + 1];
+    int32_t out_p_lsb = (int32_t) buf[start + 2];
+    return (float) (((out_p_msb << 16) | (out_p_csb << 8) | (out_p_lsb & 0xC0)) >> 6) + (float) ((out_p_lsb & 0x30) >> 4) * 0.25;
+}
+
+float get_temperature_from_fifo(uint8_t start, volatile uint8_t buf[]){
     // 2 temperature registers: MSB (8 bits) and LSB (4 bits, starting from MSB)
     // first 8 are integer bits with sign and LSB is fractional bits -> 12 bit signed integer
     int16_t t = (int16_t) buf[start + 3] << 8;
     t |= (int16_t) buf[start + 4];
-    data->temperature = ((float)t) / 256.f;
+    return ((float)t) /256.f;
 }
 
-void reset_reading(){
-    has_new_data = false;
-    read_pin_state = !read_pin_state;
+
+void mpl3115a2_convert_fifo_batch(uint8_t start, volatile uint8_t buf[], struct mpl3115a2_data_t *data) {
+    // convert a batch of fifo data into temperature and altitude data
+
+    if(altitude_is_set){
+        data->altitude = get_altitude_from_fifo(start, buf);
+    }
+    else{
+        data->pressure = get_pressure_from_fifo(start, buf);
+    }
+
+    data->temperature = get_temperature_from_fifo(start, buf);
 }
 
 void read_data(){
     gpio_put(READ_PIN, !read_pin_state);
-    //sleep_ms(250);
 
-    float tsum = 0, hsum = 0;
+    float tsum = 0, hsum = 0, psum = 0;
     struct mpl3115a2_data_t data;
     for (int i = 0; i < MPL3115A2_FIFO_SIZE; i++) {
         mpl3115a2_convert_fifo_batch(i * MPL3115A2_DATA_BATCH_SIZE, fifo_data, &data);
+        if(altitude_is_set){
+            hsum += data.altitude;
+        }
+        else{
+            psum += data.pressure;
+        }
         tsum += data.temperature;
-        hsum += data.altitude;
     }
 
     tempC = tsum / MPL3115A2_FIFO_SIZE;
     tempF = (tempC * 9 / 5) + 32;
-    altitude = hsum / MPL3115A2_FIFO_SIZE;
-
+    if(altitude_is_set){
+        altitude = hsum / MPL3115A2_FIFO_SIZE;
+    }
+    else{
+        pressure = psum / MPL3115A2_FIFO_SIZE;
+    }
+    
     has_new_data = false;
     read_pin_state = !read_pin_state;
 }
@@ -222,6 +264,11 @@ float get_farenheit_temp(){
 float get_celcius_temp(){
     return tempC;
 }
+
 float get_altitude(){
     return altitude;
+}
+
+float get_pressure(){
+    return pressure;
 }
