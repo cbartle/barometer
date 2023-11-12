@@ -200,14 +200,10 @@ float get_altitude_from_fifo(uint8_t start, volatile uint8_t buf[]){
 float get_pressure_from_fifo(uint8_t start, volatile uint8_t buf[]){
     // 3 pressure registers: MSB (8 bits), CSB (8 bits) and LSB (4 bits, starting from MSB)
     // first two  and bits 7-6 of LSB are integer bits (2's complement) and bit 5-4 of LSB are fractional bits -> makes 20 bit signed integer
-    printf("Start: %d\n", start);
-    for(int i = start; i < start + 3; i++){
-        printf("buffer @ %d: %d\n", i, buf[i]);
-    }
-    int32_t h = (int32_t) buf[start] << 24;
-    h |= (int32_t) buf[start + 1] << 16;
-    h |= (int32_t) buf[start + 2] << 8;
-    return ((float)h) / 65536.f;
+    int32_t out_p_msb = (int32_t) buf[start];
+    int32_t out_p_csb = (int32_t) buf[start + 1];
+    int32_t out_p_lsb = (int32_t) buf[start + 2];
+    return (float) (((out_p_msb << 16) | (out_p_csb << 8) | (out_p_lsb & 0xC0)) >> 6) + (float) ((out_p_lsb & 0x30) >> 4) * 0.25;
 }
 
 float get_temperature_from_fifo(uint8_t start, volatile uint8_t buf[]){
