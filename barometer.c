@@ -50,7 +50,7 @@ int main() {
     init_leds();
 
     printf("initializing sensor");
-    sensor_init(false);
+    sensor_init(true);
     printf("Running!");
     int i = 0;
     while (true) {
@@ -66,10 +66,10 @@ int main() {
             float farenheit = get_farenheit_temp()/* i*/;
             float celcius = get_celcius_temp();
             float altitude = get_altitude();
+            float pressure = get_pressure();
 
             process_farenheit(farenheit);
-           printf("%d sample average -> Farenheit: %.4f F, Celsius: %.4f, h: %.4f m\n", MPL3115A2_FIFO_SIZE, farenheit, celcius, altitude);
-            
+            printf("%d sample average -> Farenheit: %.4f F, Celsius: %.4f, h: %.4f m, Pressure: %.4f kPa\n", MPL3115A2_FIFO_SIZE, farenheit, celcius, altitude, pressure);           
             
         }
         

@@ -160,7 +160,7 @@ void gpio_callback(uint gpio, uint32_t events) {
 void sensor_init(bool barometer_mode)
 {
      printf("Hello, MPL3115A2. Waiting for something to interrupt me!...\n");
-    altitude_is_set = barometer_mode;
+    altitude_is_set = !barometer_mode;
     // use default I2C0 at 400kHz, I2C is active low
     i2c_init(i2c_default, 400 * 1000);
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
@@ -200,6 +200,10 @@ float get_altitude_from_fifo(uint8_t start, volatile uint8_t buf[]){
 float get_pressure_from_fifo(uint8_t start, volatile uint8_t buf[]){
     // 3 pressure registers: MSB (8 bits), CSB (8 bits) and LSB (4 bits, starting from MSB)
     // first two  and bits 7-6 of LSB are integer bits (2's complement) and bit 5-4 of LSB are fractional bits -> makes 20 bit signed integer
+    printf("Start: %d\n", start);
+    for(int i = start; i < start + 3; i++){
+        printf("buffer @ %d: %d\n", i, buf[i]);
+    }
     int32_t h = (int32_t) buf[start] << 24;
     h |= (int32_t) buf[start + 1] << 16;
     h |= (int32_t) buf[start + 2] << 8;
@@ -219,22 +223,13 @@ void mpl3115a2_convert_fifo_batch(uint8_t start, volatile uint8_t buf[], struct 
     // convert a batch of fifo data into temperature and altitude data
 
     if(altitude_is_set){
-        // 3 altitude registers: MSB (8 bits), CSB (8 bits) and LSB (4 bits, starting from MSB)
-        // first two are integer bits (2's complement) and LSB is fractional bits -> makes 20 bit signed integer
-        int32_t h = (int32_t) buf[start] << 24;
-        h |= (int32_t) buf[start + 1] << 16;
-        h |= (int32_t) buf[start + 2] << 8;
-        data->altitude = ((float)h) / 65536.f;
+        data->altitude = get_altitude_from_fifo(start, buf);
     }
     else{
         data->pressure = get_pressure_from_fifo(start, buf);
     }
 
-    // 2 temperature registers: MSB (8 bits) and LSB (4 bits, starting from MSB)
-    // first 8 are integer bits with sign and LSB is fractional bits -> 12 bit signed integer
-    int16_t t = (int16_t) buf[start + 3] << 8;
-    t |= (int16_t) buf[start + 4];
-    data->temperature = ((float)t) /256.f;
+    data->temperature = get_temperature_from_fifo(start, buf);
 }
 
 void read_data(){
