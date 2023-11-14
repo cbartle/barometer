@@ -19,6 +19,7 @@
     "cmake.buildBeforeRun": true,
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "files.associations": {
-        "compare": "c"
+        "compare": "c",
+        "mpl3115a2.h": "c"
     }
 }
